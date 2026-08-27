@@ -1,0 +1,147 @@
+{
+  "season": 2023,
+  "weeks": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "n_plays": 14057,
+  "n_games": 272,
+  "n_receivers": 464,
+  "n_defenders": 638,
+  "completion_rate": 0.6913993028384435,
+  "mean_separation_at_throw_yd": 4.417992720300119,
+  "mean_separation_at_arrival_yd": 3.018155148822744,
+  "mean_separation_change_yd": -0.8969315380607,
+  "coverage_tracked_in_air_share": 0.8945009603756136,
+  "qualified_receivers": 224,
+  "qualified_defenders": 301,
+  "min_targets_receiver": 20,
+  "min_targets_defender": 15,
+  "model": {
+    "target": "is_complete",
+    "n_features": 29,
+    "n_folds": 5,
+    "grouped_by": "game_id",
+    "base_rate": 0.6913993028384435,
+    "scores": {
+      "roc_auc": 0.8033904870712101,
+      "brier": 0.15585201001509721,
+      "log_loss": 0.4790569619572207,
+      "accuracy": 0.7762680515045884
+    },
+    "baselines": {
+      "base_rate": {
+        "roc_auc": 0.4945457085931171,
+        "brier": 0.21337804162530338,
+        "log_loss": 0.6180039434806511,
+        "accuracy": 0.6913993028384435
+      },
+      "logistic": {
+        "roc_auc": 0.7815104197426712,
+        "brier": 0.16619555164147967,
+        "log_loss": 0.5077742665114829,
+        "accuracy": 0.7599772355410116
+      }
+    },
+    "fold_scores": [
+      {
+        "fold": 1,
+        "n_test": 2830,
+        "roc_auc": 0.7981450336223549,
+        "brier": 0.15893276688643523,
+        "log_loss": 0.48716375546148355,
+        "accuracy": 0.7681978798586573
+      },
+      {
+        "fold": 2,
+        "n_test": 2800,
+        "roc_auc": 0.8115857807682059,
+        "brier": 0.15350329498061055,
+        "log_loss": 0.47287893980404816,
+        "accuracy": 0.7810714285714285
+      },
+      {
+        "fold": 3,
+        "n_test": 2829,
+        "roc_auc": 0.8015384344581156,
+        "brier": 0.15638374656330012,
+        "log_loss": 0.4809242876426714,
+        "accuracy": 0.776599505125486
+      },
+      {
+        "fold": 4,
+        "n_test": 2799,
+        "roc_auc": 0.797516347018644,
+        "brier": 0.15662075031798256,
+        "log_loss": 0.4801436814697094,
+        "accuracy": 0.77491961414791
+      },
+      {
+        "fold": 5,
+        "n_test": 2799,
+        "roc_auc": 0.8089196135505048,
+        "brier": 0.15378051067534504,
+        "log_loss": 0.4740665525725201,
+        "accuracy": 0.7806359414076456
+      }
+    ],
+    "calibration": [
+      {
+        "mean_predicted": 0.1846015548845625,
+        "observed": 0.18207681365576103
+      },
+      {
+        "mean_predicted": 0.3919614925209564,
+        "observed": 0.39473684210526316
+      },
+      {
+        "mean_predicted": 0.5420440374622258,
+        "observed": 0.5366548042704626
+      },
+      {
+        "mean_predicted": 0.6622583680870711,
+        "observed": 0.6756756756756757
+      },
+      {
+        "mean_predicted": 0.7495977000068342,
+        "observed": 0.7304409672830725
+      },
+      {
+        "mean_predicted": 0.8086283961245995,
+        "observed": 0.802846975088968
+      },
+      {
+        "mean_predicted": 0.8521793934662971,
+        "observed": 0.8613086770981507
+      },
+      {
+        "mean_predicted": 0.8873952010610795,
+        "observed": 0.8811387900355871
+      },
+      {
+        "mean_predicted": 0.9181078790079686,
+        "observed": 0.9110953058321479
+      },
+      {
+        "mean_predicted": 0.9490156003412301,
+        "observed": 0.938122332859175
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+# Byte-for-byte regenerable from `python -m nfl_scouting build`, and large
+# enough that committing them would dominate the repository. The scouting
+# tables and the model diagnostics they produce are committed; these three
+# are the intermediates behind them.
+artifacts/play_features.csv
+artifacts/play_features.parquet
+artifacts/dashboard_data.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
