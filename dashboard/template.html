@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFL Receiver &amp; Coverage Scouting &middot; Trey Chase</title>
+<meta name="description" content="Separation, coverage and catch probability from NFL tracking data: every targeted pass of the 2023 season, with what the receiver and the defender did while the ball was in the air.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231F5C43'/%3E%3Ctext x='16' y='23' font-family='Helvetica,Arial,sans-serif' font-size='16' font-weight='bold' fill='%23ECEFE6' text-anchor='middle'%3ETC%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --paper:#ECEFE6;--panel:#E3E7DB;--ink:#14201B;--muted:#4B5A52;
+  --field:#1F5C43;--field-deep:#153F2E;--gold:#DFA22C;
+  --line:rgba(20,32,27,.16);--line-soft:rgba(20,32,27,.08);
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Helvetica Neue",Arial,sans-serif;
+  /* Blue below, red above, near-neutral in the middle. Not green against
+     red, which is the one diverging pair a red-green colourblind reader
+     cannot separate; blue against red also splits on lightness, so it
+     survives both common forms and a black and white printout.
+     Deliberately neither of the two player colours below: a percentile
+     scale built out of orange and purple would put its own low end a shade
+     off the receiver's gold and its high end exactly on the defender's
+     purple, so every shaded number would read as a claim about which of
+     the two it belonged to. */
+  --cold:#2166AC;--hot:#B2182B;--mid:#F3F1EC;
+  --recv:#DFA22C;--cov:#542788;--other:#7A8B81;--ball:#C1442A;
+  /* The two lines every broadcast draws, in the colours every broadcast
+     draws them: blue for where the play started, yellow for the line to
+     gain. Both are lifted well clear of the field green so they read as
+     markings laid over the grass rather than as part of it. */
+  --los:#6BA8E8;--first:#F2C230;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans)}
+.bar{
+  position:sticky;top:0;z-index:20;background:var(--field);
+  border-bottom:1px solid var(--field-deep);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 22px;font-family:var(--mono);font-size:11px;letter-spacing:.13em;
+  text-transform:uppercase;
+}
+.bar a{color:rgba(236,239,230,.75);text-decoration:none}
+.bar a:hover{color:var(--paper)}
+.bar .who{color:var(--paper);font-weight:500}
+main{max-width:1180px;margin:0 auto;padding:22px}
+h1{font-size:clamp(1.3rem,3vw,1.9rem);font-weight:800;letter-spacing:-.02em;
+   margin:0 0 6px;text-transform:uppercase}
+.sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+     color:var(--muted);margin:0 0 18px}
+p.intro{font-size:16px;line-height:1.6;max-width:72ch;margin:0 0 20px}
+h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+   color:var(--muted);font-weight:700;margin:0 0 10px}
+h3{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+   color:var(--muted);font-weight:700;margin:0 0 8px}
+a{color:var(--field)}
+
+/* ---- headline numbers ------------------------------------------------ */
+.headline{display:flex;gap:30px;flex-wrap:wrap;border-top:1px solid var(--line);
+          border-bottom:1px solid var(--line);padding:16px 0;margin-bottom:22px}
+.headline div{min-width:76px}
+.headline .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+             text-transform:uppercase;color:var(--muted);display:block;margin-bottom:3px}
+.headline .v{font-size:1.45rem;font-weight:700;font-variant-numeric:tabular-nums;
+             line-height:1.1}
+.headline .n{font-family:var(--mono);font-size:9.5px;color:var(--muted);display:block}
+
+/* ---- tabs ------------------------------------------------------------ */
+.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);
+      margin-bottom:20px}
+.tabs button{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  font-weight:700;padding:10px 14px;border:0;background:transparent;color:var(--muted);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.tabs button:hover{color:var(--ink)}
+.tabs button[aria-selected="true"]{color:var(--field);border-bottom-color:var(--field)}
+.tab{display:none}
+.tab.on{display:block}
+
+/* ---- controls -------------------------------------------------------- */
+.controls{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin-bottom:16px}
+.controls label{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+                text-transform:uppercase;color:var(--muted);display:flex;
+                flex-direction:column;gap:4px}
+select,input[type=search],input[type=number]{
+  font-family:var(--mono);font-size:12px;padding:7px 11px;border-radius:999px;
+  border:1px solid var(--line);background:var(--paper);color:var(--ink);max-width:100%;
+}
+input[type=search]{min-width:190px}
+button.pill{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:7px 15px;border-radius:999px;border:1px solid var(--line);
+  background:var(--paper);color:var(--ink);cursor:pointer;font-weight:700
+}
+button.pill:hover{background:var(--panel)}
+button.pill.primary{background:var(--field);color:var(--paper);border-color:var(--field)}
+.count{font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.08em}
+
+/* ---- layout ---------------------------------------------------------- */
+.split{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:26px}
+@media (max-width:900px){.split{grid-template-columns:minmax(0,1fr)}}
+.panel{min-width:0}
+canvas{max-width:100%;height:auto;display:block}
+.note{font-size:13px;line-height:1.55;color:var(--muted);max-width:68ch;margin:10px 0 0}
+.scroll{overflow-x:auto;max-width:100%}
+
+/* ---- tables ---------------------------------------------------------- */
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:7px 9px;text-align:right;white-space:nowrap;font-size:12.5px;
+      border-bottom:1px solid var(--line-soft)}
+th:first-child,td:first-child{text-align:left}
+th:nth-child(2),td:nth-child(2){text-align:left}
+thead th{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);
+  cursor:pointer;user-select:none;position:sticky;top:0;background:var(--paper);z-index:2
+}
+thead th:hover{color:var(--ink)}
+thead th[data-dir]:after{content:" \25B4";color:var(--field)}
+thead th[data-dir="desc"]:after{content:" \25BE"}
+tbody tr:hover{background:var(--panel)}
+tbody tr.sel{background:var(--panel);box-shadow:inset 3px 0 0 var(--field)}
+.tall{max-height:620px;overflow-y:auto;overflow-x:auto}
+
+/* ---- play list ------------------------------------------------------- */
+.plays{max-height:560px;overflow-y:auto;border-top:1px solid var(--line)}
+.play{padding:9px 10px;border-bottom:1px solid var(--line-soft);cursor:pointer;font-size:13px}
+.play:hover{background:var(--panel)}
+.play.sel{background:var(--panel);box-shadow:inset 3px 0 0 var(--field)}
+.play .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.play .nm{font-weight:700}
+.play .meta{font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--muted);
+            text-transform:uppercase;margin-top:2px}
+.res{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;font-weight:700;
+     padding:2px 7px;border-radius:999px;text-transform:uppercase}
+.res.c{background:rgba(31,92,67,.14);color:var(--field)}
+.res.i{background:rgba(75,90,82,.14);color:var(--muted)}
+.res.n{background:rgba(193,68,42,.16);color:var(--ball)}
+.res.t{background:var(--gold);color:#3A2A05}
+
+/* ---- play card ------------------------------------------------------- */
+.card{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--panel)}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px;margin-top:12px}
+@media (max-width:560px){.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Each number belongs to somebody: the throw, the receiver or the defender.
+   The group header carries the same colour that player is drawn in on the
+   field above, so a number can be traced to a dot without a lookup. */
+.caption{font-size:12.5px;line-height:1.55;color:var(--muted);margin:12px 0 0;max-width:64ch}
+.sgroup{margin-top:14px}
+.sgroup:first-child{margin-top:12px}
+.sgroup > h4{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+             color:var(--muted);font-weight:700;margin:0;display:flex;align-items:center;gap:7px}
+.sgroup > h4 i{width:9px;height:9px;border-radius:2px;display:inline-block;flex:0 0 auto}
+.sgroup .grid4{margin-top:7px}
+.stat{border-left:3px solid var(--line-soft);padding-left:9px}
+.stat.recv{border-left-color:var(--recv)}
+.stat.cov{border-left-color:var(--cov)}
+.stat .vrow{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+/* The hairline matters: the middle of a diverging ramp is near-white, so a
+   50th-percentile chip would otherwise dissolve into the page and read as
+   loose text rather than as the same object the red and blue ones are. */
+.stat .p{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;
+         padding:1px 5px;border-radius:3px;white-space:nowrap;
+         border:1px solid var(--line-soft)}
+.stat .p.na{background:var(--panel);color:var(--muted)}
+.grid4 .k{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+          color:var(--muted);display:block}
+.grid4 .v{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;
+        letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:10px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;
+          vertical-align:baseline}
+.transport{display:flex;gap:8px;align-items:center;margin-top:10px}
+input[type=range]{flex:1;accent-color:var(--field)}
+
+/* ---- heat matrix ----------------------------------------------------- */
+.matrix{border-collapse:separate;border-spacing:2px;width:auto}
+.matrix td{text-align:center;border:0;border-radius:4px;padding:9px 6px;font-size:12.5px;
+           font-weight:700;width:104px;min-width:104px}
+.matrix th:first-child{width:150px}
+.matrix th{border:0;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+           text-transform:uppercase;color:var(--muted);cursor:default}
+.matrix td.empty{background:transparent;color:var(--muted);font-weight:400}
+.scale{display:flex;align-items:center;gap:8px;margin-top:12px;font-family:var(--mono);
+       font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.scale .ramp{height:10px;width:190px;border-radius:999px}
+
+.foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);
+      font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+      color:var(--muted);line-height:1.9}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <a href="../index.html#football">&#8249;&nbsp;&nbsp;Back to projects</a>
+  <span class="who">NFL receiver &amp; coverage scouting</span>
+</div>
+
+<main>
+  <h1>Receiver and coverage scouting</h1>
+  <p class="sub" id="subline">NFL Big Data Bowl 2026 &middot; 2023 season</p>
+
+  <p class="intro">
+    Every targeted pass of the 2023 NFL season, measured twice: once at the release,
+    where separation and coverage leverage are set, and once through the flight, the
+    half second to two seconds while the ball is in the air and a receiver and a
+    defender are both reacting to a destination only one of them chose. The flight is
+    where this data is unusual - it is the only window in which you can watch two
+    players respond to the same known landing spot and compare what each did about it.
+  </p>
+
+  <div class="headline" id="headline"></div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="plays" aria-selected="true">Play explorer</button>
+    <button role="tab" data-tab="receivers" aria-selected="false">Receivers</button>
+    <button role="tab" data-tab="coverage" aria-selected="false">Coverage</button>
+    <button role="tab" data-tab="matrix" aria-selected="false">Route &times; coverage</button>
+    <button role="tab" data-tab="model" aria-selected="false">Catch probability</button>
+  </div>
+
+  <!-- ================= PLAYS ================= -->
+  <section class="tab on" id="tab-plays">
+    <div class="controls">
+      <label>Search<input type="search" id="q" placeholder="Receiver, defender, team"></label>
+      <label>Week<select id="fWeek"></select></label>
+      <label>Route<select id="fRoute"></select></label>
+      <label>Coverage<select id="fMan"></select></label>
+      <label>Result<select id="fResult"></select></label>
+      <label>Sort<select id="fSort"></select></label>
+      <button class="pill" id="reset">Reset</button>
+      <span class="count" id="playCount"></span>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="card">
+          <div id="playTitle" style="font-weight:700;font-size:1.05rem"></div>
+          <div class="meta" id="playMeta" style="font-family:var(--mono);font-size:10px;
+               letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:3px 0 10px"></div>
+          <canvas id="field" width="960" height="470"></canvas>
+          <div class="transport">
+            <button class="pill primary" id="playBtn">Play</button>
+            <input type="range" id="scrub" min="0" max="1" value="0" step="1">
+            <span class="count" id="clock"></span>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--recv)"></i>Targeted receiver</span>
+            <span><i style="background:var(--cov)"></i>Nearest defender</span>
+            <span><i style="background:var(--other)"></i>Other tracked</span>
+            <span><i style="background:var(--ball)"></i>Ball landing spot</span>
+            <span><i style="background:var(--los)"></i>Line of scrimmage</span>
+            <span><i style="background:var(--first)"></i>Line to gain</span>
+          </div>
+          <!-- The stat groups each carry their own grid4, so this is a plain
+               block: making it a grid too would lay the three groups out as
+               three columns of one. -->
+          <div id="playStats"></div>
+          <p class="caption" id="statsCaption">
+            Each number carries its percentile among every target of the season
+            that has one, shaded blue where the play sits low and red where it
+            sits high. The chip says where the number falls, not whether it is
+            good: a receiver&rsquo;s separation and a defender&rsquo;s closing
+            speed are both better high, and both are in every play here, so the
+            metrics are grouped by whose they are instead &mdash; in the colours
+            those players are drawn in above.
+          </p>
+        </div>
+        <p class="note" id="playNote"></p>
+      </div>
+      <div class="panel">
+        <h3>Matching plays</h3>
+        <div class="plays" id="playList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= RECEIVERS ================= -->
+  <section class="tab" id="tab-receivers">
+    <div class="controls">
+      <label>Search<input type="search" id="rq" placeholder="Receiver"></label>
+      <label>Position<select id="rPos"></select></label>
+      <label>Minimum targets<input type="number" id="rMin" min="1" step="5" style="width:92px"></label>
+      <span class="count" id="rCount"></span>
+    </div>
+    <p class="note" style="margin:0 0 12px">
+      Separation is not comparable across positions. A back released into the flat is
+      open by ten yards because nobody is covering him there; a receiver running a go
+      route is open by two because a corner is running with him. Filter to one position
+      before reading the separation columns as a ranking. Catch rate over expected is
+      already adjusted for the throw, so it does compare.
+    </p>
+    <div class="scroll tall"><table id="rTable"></table></div>
+  </section>
+
+  <!-- ================= COVERAGE ================= -->
+  <section class="tab" id="tab-coverage">
+    <div class="controls">
+      <label>Search<input type="search" id="dq" placeholder="Defender"></label>
+      <label>Position<select id="dPos"></select></label>
+      <label>Minimum targets<input type="number" id="dMin" min="1" step="5" style="width:92px"></label>
+      <span class="count" id="dCount"></span>
+    </div>
+    <p class="note" style="margin:0 0 12px">
+      Coverage is charged to the defender nearest the receiver when the ball is
+      released, which is the same proxy Next Gen Stats uses for separation. On a
+      bracket it names one of the two defenders, and on a busted zone exchange it can
+      name the man who was closest rather than the man who was beaten. Passer rating
+      allowed is the standard formula applied to the throws he was charged with.
+    </p>
+    <div class="scroll tall"><table id="dTable"></table></div>
+  </section>
+
+  <!-- ================= MATRIX ================= -->
+  <section class="tab" id="tab-matrix">
+    <div class="controls">
+      <label>Measure<select id="mMetric"></select></label>
+      <label>Split by<select id="mSplit"></select></label>
+      <span class="count" id="mCount"></span>
+    </div>
+    <div class="scroll"><table class="matrix" id="mTable"></table></div>
+    <div class="scale">
+      <span id="mLow"></span>
+      <span class="ramp" id="mRamp"></span>
+      <span id="mHigh"></span>
+    </div>
+    <p class="note" id="mNote"></p>
+  </section>
+
+  <!-- ================= MODEL ================= -->
+  <section class="tab" id="tab-model">
+    <div class="split">
+      <div class="panel">
+        <h3>Calibration, out of fold</h3>
+        <canvas id="calib" width="560" height="470"></canvas>
+        <p class="note">
+          Plays are grouped into ten equal buckets by predicted catch probability. A
+          point on the diagonal means that when the model said 40%, 40% of those throws
+          were caught. Calibration is what makes catch rate over expected meaningful:
+          without it the residual measures the model's bias rather than the receiver's
+          hands.
+        </p>
+      </div>
+      <div class="panel">
+        <h3>What the model is beating</h3>
+        <div class="scroll"><table id="scoreTable"></table></div>
+        <p class="note">
+          Validation is grouped by game, so no play is scored by a model that saw
+          another snap from the same game. Plays from one game share a quarterback, a
+          secondary and a weather, and a random split would let the model recognise
+          the game rather than the throw.
+        </p>
+        <h3 style="margin-top:20px">What it leans on</h3>
+        <canvas id="imp" width="560" height="430"></canvas>
+        <p class="note">
+          Permutation importance: how much worse the log loss gets when one feature is
+          shuffled. The model sees only the release - where everyone was and how they
+          were moving when the ball left the hand, plus where it was going and how long
+          it would be in the air. Nothing from the flight is a feature, which is
+          checked in the test suite rather than trusted.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot" id="foot"></div>
+</main>
+
+<script id="payload" type="application/json">/*__DATA__*/</script>
+<!-- Field geometry, injected from nfl_scouting/config.py at build time. The
+     drawing and the analysis then measure the same field: a change to the
+     end zone depth or the field length moves the picture and the numbers
+     together instead of only one of them. -->
+<script id="field-geometry" type="application/json">/*__FIELD__*/</script>
+<script>
+/*__SCRIPT__*/
+</script>
+</body>
+</html>
