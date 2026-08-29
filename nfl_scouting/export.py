@@ -24,6 +24,7 @@ import pandas as pd
 from . import data
 from .config import (
     COVERAGE_DB_POSITIONS,
+    DT,
     MIN_TARGETS_FOR_DEFENDER,
     MIN_TARGETS_FOR_RECEIVER,
     OPEN_SEPARATION_YARDS,
@@ -35,21 +36,18 @@ from .config import (
 # int16 with three orders of magnitude to spare.
 POSITION_SCALE = 10.0
 
-# The pre-pass route is drawn as a shape, not animated, so every third
-# frame traces it perfectly well and costs a third of what every frame does.
-ROUTE_STRIDE = 3
+# The pre-pass phase is stored for every tracked player so the play can be
+# animated from the snap rather than from the throw. Every third frame is the
+# compromise that makes that affordable: a route is a smooth path, so 3.3 Hz
+# traces its shape faithfully at a third of the cost of 10 Hz, and the page
+# draws between the samples. The ball in the air is kept at the full frame
+# rate, because that half second is the part this project is actually about
+# and a tenth of a second of it is not a detail.
+PRE_STRIDE = 3
 
 KIND_TARGET = 0
 KIND_PRIMARY_COVERAGE = 1
 KIND_OTHER_COVERAGE = 2
-
-ROLE_CODES = {
-    "Targeted Receiver": 0,
-    "Defensive Coverage": 1,
-    "Passer": 2,
-    "Other Route Runner": 3,
-}
-
 
 class Interner:
     """Give every distinct string an index, keeping first-seen order."""
@@ -99,14 +97,23 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
     """Per-play tracking, packed into one int16 blob with an offset table.
 
     Each play's block is laid out as:
-        [n_snapshot, n_route_frames, n_flight_players,
-         (role, x, y) * n_snapshot,
-         (x, y) * n_route_frames,
+        [n_pre_players, n_pre_frames, n_flight_players,
+         (kind, (x, y) * n_pre_frames) * n_pre_players,
          (kind, n_frames, (x, y) * n_frames) * n_flight_players]
 
-    The snapshot is every tracked player at the release; the route is the
-    targeted receiver's path up to it; the flight blocks are the tracked
-    players while the ball is in the air.
+    The pre-release section is every tracked player's path from the snap to
+    the throw, subsampled by :data:`PRE_STRIDE`; the flight blocks are the
+    tracked players while the ball is in the air, at the full frame rate.
+
+    Every player in a play carries the same number of pre-release samples,
+    which is why one count serves the whole section - the tracking file has
+    every player on every frame, and the release frame is forced into the
+    subsample so the last pre-release position is where the flight starts
+    from rather than wherever the stride happened to land.
+
+    There is no separate snapshot of the release any more: a player's last
+    pre-release sample *is* his position at the release, so storing it twice
+    only created a way for the two to disagree.
     """
     weeks = weeks or sorted(int(w) for w in plays["week"].unique())
     wanted = plays.set_index(["game_id", "play_id"])
@@ -120,23 +127,45 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
             if key not in wanted.index:
                 continue
             play = wanted.loc[key]
-            last_frame = tracking["frame_id"].max()
-            snapshot = tracking[tracking["frame_id"] == last_frame]
+
+            frame_ids = np.sort(tracking["frame_id"].unique())
+            # The stride is taken from the snap forward, then the release
+            # frame is added back: it is the one sample that has to be there,
+            # because the flight starts where it leaves off.
+            keep = np.unique(np.concatenate([
+                np.arange(0, len(frame_ids), PRE_STRIDE), [len(frame_ids) - 1]]))
+            wanted_frames = set(frame_ids[keep].tolist())
 
             parts: list[np.ndarray] = []
-            header = [len(snapshot)]
+            header = [0, len(keep)]
 
-            snap = np.empty(len(snapshot) * 3, dtype=np.int16)
-            snap[0::3] = [ROLE_CODES.get(r, 3) for r in snapshot["player_role"]]
-            snap[1::3] = _quantise(snapshot["x"])
-            snap[2::3] = _quantise(snapshot["y"])
-
-            route = tracking[tracking["nfl_id"] == play["target_nfl_id"]].sort_values("frame_id")
-            route = route.iloc[::ROUTE_STRIDE]
-            route_packed = np.empty(len(route) * 2, dtype=np.int16)
-            route_packed[0::2] = _quantise(route["x"])
-            route_packed[1::2] = _quantise(route["y"])
-            header.append(len(route))
+            pre_parts: list[np.ndarray] = []
+            n_pre = 0
+            for nfl_id, track in tracking.groupby("nfl_id", sort=False):
+                track = track[track["frame_id"].isin(wanted_frames)].sort_values("frame_id")
+                if len(track) != len(keep):
+                    # A player the tracking drops part-way through would put
+                    # the whole block out of step, so he is left out rather
+                    # than padded with positions nobody recorded.
+                    continue
+                # The same three kinds the flight section uses, so a dot keeps
+                # its colour across the release. The tracking file's own role
+                # cannot do this: it calls every defender in coverage
+                # "Defensive Coverage", and the page's legend promises purple
+                # is *the* nearest defender rather than any of them.
+                if nfl_id == play["target_nfl_id"]:
+                    kind = KIND_TARGET
+                elif nfl_id == play["coverage_nfl_id"]:
+                    kind = KIND_PRIMARY_COVERAGE
+                else:
+                    kind = KIND_OTHER_COVERAGE
+                packed = np.empty(len(track) * 2 + 1, dtype=np.int16)
+                packed[0] = kind
+                packed[1::2] = _quantise(track["x"])
+                packed[2::2] = _quantise(track["y"])
+                pre_parts.append(packed)
+                n_pre += 1
+            header[0] = n_pre
 
             flight_parts: list[np.ndarray] = []
             air = air_by_play.get(key)
@@ -160,8 +189,7 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
             header.append(n_flight)
 
             parts.append(np.array(header, dtype=np.int16))
-            parts.append(snap)
-            parts.append(route_packed)
+            parts.extend(pre_parts)
             parts.extend(flight_parts)
             blocks[key] = np.concatenate(parts)
 
@@ -179,6 +207,11 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
     blob = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
     return {
         "scale": POSITION_SCALE,
+        # Seconds between stored samples, per phase. The page needs both to
+        # put one clock over an animation whose two halves are recorded at
+        # different rates.
+        "preStep": round(PRE_STRIDE * DT, 6),
+        "flightStep": round(DT, 6),
         "offsets": offsets,
         "data": base64.b64encode(blob.astype("<i2").tobytes()).decode("ascii"),
         "n_values": int(blob.size),

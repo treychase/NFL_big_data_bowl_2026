@@ -367,20 +367,34 @@ var GOAL_NEAR = FIELD.endZone, GOAL_FAR = FIELD.length - FIELD.endZone;
 
 var geo = null, frame = 0, timer = null;
 
+/* The play is recorded in two phases at two rates: everyone from the snap to
+   the throw at PRE_STEP seconds a sample, then the players near the ball
+   through the flight at FLIGHT_STEP. The animation runs on one clock at the
+   flight's rate, so a tick is always the same slice of real time; positions
+   between two pre-snap samples are drawn by interpolating them, which is a
+   rendering choice about a smooth path and not a claim that anybody was
+   measured there. */
+var PRE_STEP = (D.geometry && D.geometry.preStep) || 0.3;
+var FLIGHT_STEP = (D.geometry && D.geometry.flightStep) || 0.1;
+var PRE_TICKS = Math.max(1, Math.round(PRE_STEP / FLIGHT_STEP));
+
 function loadGeometry(i) {
   geo = null;
   if (GEO && D.geometry.offsets[i] >= 0) {
     var o = D.geometry.offsets[i];
-    var nSnap = GEO[o], nRoute = GEO[o + 1], nFlight = GEO[o + 2];
+    var nPre = GEO[o], nPreFrames = GEO[o + 1], nFlight = GEO[o + 2];
     var p = o + 3;
-    var snap = [];
-    for (var s = 0; s < nSnap; s++, p += 3) {
-      snap.push({ role: GEO[p], x: GEO[p + 1] / GEO_SCALE, y: GEO[p + 2] / GEO_SCALE });
+
+    var pre = [];
+    for (var s = 0; s < nPre; s++) {
+      var kind = GEO[p]; p += 1;
+      var path = [];
+      for (var q = 0; q < nPreFrames; q++, p += 2) {
+        path.push({ x: GEO[p] / GEO_SCALE, y: GEO[p + 1] / GEO_SCALE });
+      }
+      pre.push({ kind: kind, path: path });
     }
-    var route = [];
-    for (var r = 0; r < nRoute; r++, p += 2) {
-      route.push({ x: GEO[p] / GEO_SCALE, y: GEO[p + 1] / GEO_SCALE });
-    }
+
     var flight = [], maxLen = 0;
     for (var f = 0; f < nFlight; f++) {
       var kind = GEO[p], len = GEO[p + 1];
@@ -392,13 +406,36 @@ function loadGeometry(i) {
       flight.push({ kind: kind, pts: pts });
       if (len > maxLen) maxLen = len;
     }
-    geo = { snap: snap, route: route, flight: flight, frames: maxLen };
+
+    /* The targeted receiver's own pre-snap path is the route, and the last
+       sample of every path is that player at the release. */
+    var target = null;
+    pre.forEach(function (q) { if (q.kind === 0) target = q; });
+
+    var preTicks = Math.max(0, (nPreFrames - 1)) * PRE_TICKS;
+    geo = {
+      pre: pre, flight: flight, route: target ? target.path : [],
+      preFrames: nPreFrames, preTicks: preTicks,
+      flightFrames: maxLen,
+      frames: preTicks + Math.max(0, maxLen - 1)
+    };
   }
   frame = 0;
   $("scrub").max = geo ? geo.frames : 1;
   $("scrub").value = 0;
   stop();
   drawField();
+}
+
+/* Where a pre-snap player is at tick t of the run-up, interpolating between
+   the two samples that bracket it. */
+function preAt(path, tick) {
+  var exact = tick / PRE_TICKS;
+  var a = Math.min(Math.floor(exact), path.length - 1);
+  var b = Math.min(a + 1, path.length - 1);
+  var u = exact - a;
+  return { x: path[a].x + (path[b].x - path[a].x) * u,
+           y: path[a].y + (path[b].y - path[a].y) * u };
 }
 
 var DOWN_NAMES = ["", "1ST", "2ND", "3RD", "4TH"];
@@ -603,21 +640,42 @@ function drawField() {
     return;
   }
 
-  /* The route up to the release. */
-  g.strokeStyle = "rgba(223,162,44,.55)";
-  g.lineWidth = 2;
-  g.beginPath();
-  geo.route.forEach(function (q, k) {
-    if (k === 0) g.moveTo(px(q.x), py(q.y)); else g.lineTo(px(q.x), py(q.y));
-  });
-  g.stroke();
+  /* Where the play has got to. Both halves of the drawing below read these,
+     so they are settled once here rather than recomputed per block. */
+  var inRunUp = frame < geo.preTicks;
+  var preTick = Math.min(frame, geo.preTicks);
 
-  /* Everyone else on the field at the release. */
-  geo.snap.forEach(function (s) {
-    if (s.role === 0 || s.role === 1) return;
-    if (s.x < x0 || s.x > x1 || s.y < y0 || s.y > y1) return;
-    g.fillStyle = "rgba(236,239,230,.30)";
-    g.beginPath(); g.arc(px(s.x), py(s.y), 4, 0, 6.284); g.fill();
+  /* The route, drawn only as far as the play has actually got, so the run-up
+     traces itself out rather than sitting there finished from the first
+     frame. */
+  if (geo.route.length) {
+    var drawn = Math.min(preTick / PRE_TICKS, geo.route.length - 1);
+    g.strokeStyle = "rgba(223,162,44,.55)";
+    g.lineWidth = 2;
+    g.beginPath();
+    for (var rk = 0; rk <= Math.floor(drawn); rk++) {
+      var q = geo.route[rk];
+      if (rk === 0) g.moveTo(px(q.x), py(q.y)); else g.lineTo(px(q.x), py(q.y));
+    }
+    var head = preAt(geo.route, preTick);
+    g.lineTo(px(head.x), py(head.y));
+    g.stroke();
+  }
+
+  /* Everyone on the field. Before the throw they move; after it, the players
+     the tracking follows into the air move and the rest hold where the
+     release left them, because that is the last thing recorded about them. */
+  geo.pre.forEach(function (q) {
+    var at = preAt(q.path, preTick);
+    if (at.x < x0 || at.x > x1 || at.y < y0 || at.y > y1) return;
+    /* The two the page is about keep their own colours the whole way
+       through; everyone else is background at any point in the play. */
+    var lead = q.kind === 0 || q.kind === 1;
+    if (lead && !inRunUp) return;         /* their flight path draws them */
+    g.fillStyle = lead
+      ? (q.kind === 0 ? cssVar("--recv") : cssVar("--cov"))
+      : "rgba(236,239,230,.30)";
+    g.beginPath(); g.arc(px(at.x), py(at.y), lead ? 6.5 : 4, 0, 6.284); g.fill();
   });
 
   /* Ball landing spot. */
@@ -630,11 +688,14 @@ function drawField() {
   g.moveTo(bx + 5, by - 5); g.lineTo(bx - 5, by + 5);
   g.stroke();
 
-  /* Flight paths, drawn up to the current frame. */
-  geo.flight.forEach(function (t) {
+  /* Flight paths, drawn up to the current frame - and not at all until the
+     ball is out, or every player the tracking follows into the air would sit
+     as a second dot on his own release spot while he is still running the
+     route. */
+  if (!inRunUp) geo.flight.forEach(function (t) {
     var color = t.kind === 0 ? cssVar("--recv")
               : t.kind === 1 ? cssVar("--cov") : cssVar("--other");
-    var upto = Math.min(frame, t.pts.length - 1);
+    var upto = Math.max(0, Math.min(frame - geo.preTicks, t.pts.length - 1));
     g.strokeStyle = color;
     g.lineWidth = t.kind === 2 ? 1.5 : 2.5;
     g.globalAlpha = t.kind === 2 ? 0.55 : 1;
@@ -650,8 +711,13 @@ function drawField() {
     g.globalAlpha = 1;
   });
 
-  $("clock").textContent = (frame / 10).toFixed(1) + " s of " +
-    ((geo.frames - 1) / 10).toFixed(1) + " s in the air";
+  /* One clock, zeroed at the throw: negative through the run-up, positive
+     while the ball is in the air. */
+  var seconds = (frame - geo.preTicks) * FLIGHT_STEP;
+  var air = Math.max(0, geo.flightFrames - 1) * FLIGHT_STEP;
+  $("clock").textContent = seconds < 0
+    ? Math.abs(seconds).toFixed(1) + " s before the throw"
+    : seconds.toFixed(1) + " s of " + air.toFixed(1) + " s in the air";
 }
 
 function stop() {
