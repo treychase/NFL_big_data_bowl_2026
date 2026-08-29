@@ -40,7 +40,11 @@ catch rate over expected worth reading.
 
 **A dashboard.** Every play in the season, filterable and drawn on the field
 with the flight animated, plus the scouting tables and the model's own
-diagnostics.
+diagnostics. It is one self-contained HTML file that needs no server and no
+network; the template, the script and the build that assembles them all live
+in `dashboard/`, and it is published to
+[treychase.github.io](https://treychase.github.io/projects/nfl-scouting.html)
+by copying the built file across.
 
 ## Running it
 
@@ -50,6 +54,7 @@ pip install pandas numpy scipy scikit-learn pyarrow pytest
 python -m nfl_scouting build            # extract, fit, score, write artifacts
 python -m nfl_scouting report           # the headline numbers
 python -m nfl_scouting export --out dashboard_data.json
+python -m nfl_scouting page              # render dashboard/nfl-scouting.html
 ```
 
 `build` caches the extracted play table to `artifacts/play_features.parquet`;
@@ -84,6 +89,7 @@ nfl_scouting/
   model.py       catch probability, its validation, and the leakage guard
   pipeline.py    build everything, write everything
   export.py      pack the artifacts for the dashboard
+  page.py        assemble the dashboard page from the payload and dashboard/
   cli.py         python -m nfl_scouting
 ```
 

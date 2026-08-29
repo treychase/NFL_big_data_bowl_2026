@@ -4,6 +4,7 @@
     python -m nfl_scouting build --refresh       # re-extract the tracking
     python -m nfl_scouting build --weeks 1 2 3   # a slice, for a quick look
     python -m nfl_scouting export --out data.json
+    python -m nfl_scouting page                  # render the dashboard page
     python -m nfl_scouting report                # what the last build found
 """
 
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import export, pipeline
+from . import export, page, pipeline
 from .config import N_CV_FOLDS, RANDOM_SEED, SEASON, artifact_dir
 
 
@@ -54,6 +55,17 @@ def build_parser() -> argparse.ArgumentParser:
                           help="payload path (default: <out-dir>/dashboard_data.json)")
     exporter.add_argument("--no-geometry", action="store_true",
                           help="skip per-play tracking, for a much smaller file")
+
+    pager = sub.add_parser(
+        "page", help="render the self-contained dashboard page")
+    _add_common(pager)
+    pager.add_argument("--data", type=Path, default=None,
+                       help="payload to render (default: export one from the "
+                            "last build)")
+    pager.add_argument("--out", type=Path, default=None,
+                       help=f"page path (default: {page.DEFAULT_OUT})")
+    pager.add_argument("--no-geometry", action="store_true",
+                       help="skip per-play tracking, for a much smaller page")
 
     report = sub.add_parser("report", help="print the last build's headline numbers")
     _add_common(report)
@@ -104,6 +116,26 @@ def main(argv=None) -> int:
             n_folds=args.folds, random_state=args.seed)
         print(f"wrote artifacts to {out_dir}")
         return _report(out_dir)
+
+    if args.command == "page":
+        # A payload on disk is the common case when only the front end
+        # changed; without one, export straight from the last build rather
+        # than making the caller write a temporary file just to read it back.
+        if args.data:
+            payload = json.loads(Path(args.data).read_text())
+        else:
+            payload = export.build_payload(
+                _load_artifacts(out_dir), weeks=args.weeks, season=args.season,
+                root=args.data_dir, with_geometry=not args.no_geometry)
+        out = Path(args.out or page.DEFAULT_OUT)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(page.render(payload))
+        print(f"wrote {out} ({out.stat().st_size / 1e6:.2f} MB), "
+              f"{payload['meta']['nPlays']:,} targets, "
+              f"{payload['meta']['nGames']} games, "
+              f"{payload['meta']['season']} weeks "
+              f"{payload['meta']['weeks'][0]}-{payload['meta']['weeks'][-1]}")
+        return 0
 
     if args.command == "export":
         artifacts = _load_artifacts(out_dir)
