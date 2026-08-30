@@ -1,10 +1,17 @@
 # Dashboard
 
 `nfl-scouting.html` is the built scouting app: every targeted pass of the
-season, filterable and drawn on the field with the flight animated, plus the
-receiver and coverage tables, the route-by-coverage matrix, and the catch
-probability model's own diagnostics. It is self-contained — open it in a
-browser, no server and no network.
+season, filterable and drawn on the field with the play animated from the
+snap, plus the receiver and coverage tables, the route-by-coverage matrix,
+and the catch probability model's own diagnostics. It is self-contained —
+open it in a browser, no server and no network.
+
+Every defender the tracking carries is animated and drawn in coverage purple,
+with the one charged with the target in the darker shade. The competition's output
+file follows only a few players into the air, though, so the defenders it
+does not follow stop at the throw and are left as open rings on the last spot
+anybody measured them — the page never slides a dot along a path that was not
+recorded.
 
 It is generated, not edited. The three parts it is generated from live here:
 

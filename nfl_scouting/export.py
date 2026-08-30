@@ -28,7 +28,9 @@ from .config import (
     MIN_TARGETS_FOR_DEFENDER,
     MIN_TARGETS_FOR_RECEIVER,
     OPEN_SEPARATION_YARDS,
+    ROLE_COVERAGE,
     SEASON,
+    SIDE_DEFENCE,
 )
 
 # Positions are stored as tenths of a yard, which is the precision the
@@ -45,9 +47,17 @@ POSITION_SCALE = 10.0
 # and a tenth of a second of it is not a detail.
 PRE_STRIDE = 3
 
+# What a dot is, and therefore what colour it keeps for the whole play. The
+# tracking file's own role cannot carry this: it calls every defender
+# "Defensive Coverage", and the page's legend promises purple is *the*
+# nearest defender rather than any of them. So the two the play is about get
+# their own kinds and everybody else is split by the side of the ball, which
+# is what lets the page draw a whole coverage as defenders instead of as
+# anonymous grey dots.
 KIND_TARGET = 0
 KIND_PRIMARY_COVERAGE = 1
-KIND_OTHER_COVERAGE = 2
+KIND_OTHER_OFFENCE = 2
+KIND_OTHER_DEFENCE = 3
 
 class Interner:
     """Give every distinct string an index, keeping first-seen order."""
@@ -92,18 +102,55 @@ def pack_ints(values, dtype="<i2") -> str:
     return _b64(np.nan_to_num(array, nan=0.0).astype(dtype))
 
 
+def _defensive_ids(play_tracking: pd.DataFrame) -> set:
+    """Everyone on the defence in one play.
+
+    Read from ``player_side`` where the file carries it, and from the
+    coverage role otherwise - which is the same set for this competition's
+    files, since every defender in them is in coverage, but says so from the
+    column that actually means it.
+    """
+    if "player_side" in play_tracking:
+        side = play_tracking["player_side"].astype("str").str.strip().str.lower()
+        rows = play_tracking[side.eq(SIDE_DEFENCE.lower())]
+    else:
+        rows = play_tracking[play_tracking["player_role"].eq(ROLE_COVERAGE)]
+    return set(rows["nfl_id"].unique())
+
+
+def _kind(nfl_id, play: pd.Series, defence: set) -> int:
+    """Which of the four kinds a player is drawn as.
+
+    The targeted receiver and the defender charged with covering him are the
+    two the page is about and keep their own colours; everyone else is drawn
+    by his side of the ball.
+    """
+    if nfl_id == play["target_nfl_id"]:
+        return KIND_TARGET
+    if nfl_id == play["coverage_nfl_id"]:
+        return KIND_PRIMARY_COVERAGE
+    return KIND_OTHER_DEFENCE if nfl_id in defence else KIND_OTHER_OFFENCE
+
+
 def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
                    root: Path | None = None) -> dict:
     """Per-play tracking, packed into one int16 blob with an offset table.
 
     Each play's block is laid out as:
         [n_pre_players, n_pre_frames, n_flight_players,
-         (kind, (x, y) * n_pre_frames) * n_pre_players,
+         (kind, in_air, (x, y) * n_pre_frames) * n_pre_players,
          (kind, n_frames, (x, y) * n_frames) * n_flight_players]
 
     The pre-release section is every tracked player's path from the snap to
     the throw, subsampled by :data:`PRE_STRIDE`; the flight blocks are the
     tracked players while the ball is in the air, at the full frame rate.
+
+    ``in_air`` says whether that player has a flight block waiting for him.
+    The competition's output file follows only a handful of the players into
+    the air, so most of the defence has no recorded position after the
+    release: the flag is what lets the page stop animating those players at
+    the throw and say so, instead of leaving a dot sitting on the grass that
+    looks like a measurement.
 
     Every player in a play carries the same number of pre-release samples,
     which is why one count serves the whole section - the tracking file has
@@ -139,6 +186,10 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
             parts: list[np.ndarray] = []
             header = [0, len(keep)]
 
+            air = air_by_play.get(key)
+            in_air = set() if air is None else set(air["nfl_id"].unique())
+            defence = _defensive_ids(tracking)
+
             pre_parts: list[np.ndarray] = []
             n_pre = 0
             for nfl_id, track in tracking.groupby("nfl_id", sort=False):
@@ -148,39 +199,24 @@ def build_geometry(plays: pd.DataFrame, weeks=None, season: int = SEASON,
                     # the whole block out of step, so he is left out rather
                     # than padded with positions nobody recorded.
                     continue
-                # The same three kinds the flight section uses, so a dot keeps
-                # its colour across the release. The tracking file's own role
-                # cannot do this: it calls every defender in coverage
-                # "Defensive Coverage", and the page's legend promises purple
-                # is *the* nearest defender rather than any of them.
-                if nfl_id == play["target_nfl_id"]:
-                    kind = KIND_TARGET
-                elif nfl_id == play["coverage_nfl_id"]:
-                    kind = KIND_PRIMARY_COVERAGE
-                else:
-                    kind = KIND_OTHER_COVERAGE
-                packed = np.empty(len(track) * 2 + 1, dtype=np.int16)
-                packed[0] = kind
-                packed[1::2] = _quantise(track["x"])
-                packed[2::2] = _quantise(track["y"])
+                # The same kinds the flight section uses, so a dot keeps its
+                # colour across the release.
+                packed = np.empty(len(track) * 2 + 2, dtype=np.int16)
+                packed[0] = _kind(nfl_id, play, defence)
+                packed[1] = 1 if nfl_id in in_air else 0
+                packed[2::2] = _quantise(track["x"])
+                packed[3::2] = _quantise(track["y"])
                 pre_parts.append(packed)
                 n_pre += 1
             header[0] = n_pre
 
             flight_parts: list[np.ndarray] = []
-            air = air_by_play.get(key)
             n_flight = 0
             if air is not None:
                 for nfl_id, track in air.groupby("nfl_id", sort=False):
                     track = track.sort_values("frame_id")
-                    if nfl_id == play["target_nfl_id"]:
-                        kind = KIND_TARGET
-                    elif nfl_id == play["coverage_nfl_id"]:
-                        kind = KIND_PRIMARY_COVERAGE
-                    else:
-                        kind = KIND_OTHER_COVERAGE
                     packed = np.empty(len(track) * 2 + 2, dtype=np.int16)
-                    packed[0] = kind
+                    packed[0] = _kind(nfl_id, play, defence)
                     packed[1] = len(track)
                     packed[2::2] = _quantise(track["x"])
                     packed[3::2] = _quantise(track["y"])

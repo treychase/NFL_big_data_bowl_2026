@@ -39,8 +39,8 @@ Calibration is close to the diagonal in every decile, which is what makes
 catch rate over expected worth reading.
 
 **A dashboard.** Every play in the season, filterable and drawn on the field
-with the flight animated, plus the scouting tables and the model's own
-diagnostics. It is one self-contained HTML file that needs no server and no
+with the play animated from the snap and every defender the tracking carries
+moving with it, plus the scouting tables and the model's own diagnostics. It is one self-contained HTML file that needs no server and no
 network; the template, the script and the build that assembles them all live
 in `dashboard/`, and it is published to
 [treychase.github.io](https://treychase.github.io/projects/nfl-scouting.html)

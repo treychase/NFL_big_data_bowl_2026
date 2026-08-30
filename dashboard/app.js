@@ -367,6 +367,17 @@ var GOAL_NEAR = FIELD.endZone, GOAL_FAR = FIELD.length - FIELD.endZone;
 
 var geo = null, frame = 0, timer = null;
 
+/* The four kinds the geometry packs, in the order it packs them: the
+   targeted receiver, the defender charged with covering him, the rest of the
+   offence, and the rest of the defence. The two the page is about get their
+   own colours; everybody else is drawn by his side of the ball, so every
+   defender in the coverage reads as a defender rather than as one of a set
+   of anonymous grey dots. */
+var KIND_TARGET = 0, KIND_COVERAGE = 1, KIND_OFFENCE = 2, KIND_DEFENCE = 3;
+var KIND_COLOR = ["--recv", "--cov", "--other", "--cov-soft"];
+function kindColor(kind) { return cssVar(KIND_COLOR[kind] || "--other"); }
+function isLead(kind) { return kind === KIND_TARGET || kind === KIND_COVERAGE; }
+
 /* The play is recorded in two phases at two rates: everyone from the snap to
    the throw at PRE_STEP seconds a sample, then the players near the ball
    through the flight at FLIGHT_STEP. The animation runs on one clock at the
@@ -387,12 +398,15 @@ function loadGeometry(i) {
 
     var pre = [];
     for (var s = 0; s < nPre; s++) {
-      var kind = GEO[p]; p += 1;
+      /* inAir says the tracking followed this player past the release, so
+         his flight block draws him from there on. Everyone else stops at
+         the throw, which is the last thing recorded about him. */
+      var kind = GEO[p], inAir = GEO[p + 1] === 1; p += 2;
       var path = [];
       for (var q = 0; q < nPreFrames; q++, p += 2) {
         path.push({ x: GEO[p] / GEO_SCALE, y: GEO[p + 1] / GEO_SCALE });
       }
-      pre.push({ kind: kind, path: path });
+      pre.push({ kind: kind, inAir: inAir, path: path });
     }
 
     var flight = [], maxLen = 0;
@@ -410,11 +424,17 @@ function loadGeometry(i) {
     /* The targeted receiver's own pre-snap path is the route, and the last
        sample of every path is that player at the release. */
     var target = null;
-    pre.forEach(function (q) { if (q.kind === 0) target = q; });
+    pre.forEach(function (q) { if (q.kind === KIND_TARGET) target = q; });
 
     var preTicks = Math.max(0, (nPreFrames - 1)) * PRE_TICKS;
+    /* The two the page is about are drawn last so a safety crossing behind
+       them cannot sit on top of the pair the play is about. */
+    var order = pre.filter(function (q) { return !isLead(q.kind); })
+                   .concat(pre.filter(function (q) { return isLead(q.kind); }));
+
     geo = {
-      pre: pre, flight: flight, route: target ? target.path : [],
+      pre: pre, preDrawOrder: order, flight: flight,
+      route: target ? target.path : [],
       preFrames: nPreFrames, preTicks: preTicks,
       flightFrames: maxLen,
       frames: preTicks + Math.max(0, maxLen - 1)
@@ -476,9 +496,16 @@ function markLine(g, X, W, color, label) {
   g.textBaseline = "alphabetic";
 }
 
-var KIND_COLOR = ["var(--recv)", "var(--cov)", "var(--other)"];
+/* Resolved once each. The field asks for one of these per player per frame
+   now that the whole coverage is drawn in colour, and getComputedStyle is a
+   style recalculation every time it is called. */
+var CSS_CACHE = {};
 function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (!(name in CSS_CACHE)) {
+    CSS_CACHE[name] =
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  return CSS_CACHE[name];
 }
 
 function clearField() {
@@ -492,11 +519,12 @@ function drawField() {
   if (!isFinite(P.landX[i])) { clearField(); return; }
 
   /* The view follows the play rather than showing all 120 yards, so a five
-     yard hitch is not drawn as four pixels of movement. The box is built
-     from the ball, the route and the flight - not from every tracked player
-     - because a safety standing forty yards off would otherwise set the
-     zoom for a one yard screen and shrink the actual play to a dot. Players
-     outside the frame simply are not drawn. */
+     yard hitch is not drawn as four pixels of movement. By default the box
+     is built from the ball, the route and the flight - not from every
+     tracked player - because a safety standing forty yards off would
+     otherwise set the zoom for a one yard screen and shrink the actual play
+     to a dot. "Whole coverage" is the other side of that trade, and it is
+     the reader's to make. Players outside the frame simply are not drawn. */
   /* The line to gain. Which way the offence is going decides the sign, and
      the flag that decides it is the same one that flips the drawing below.
      In a goal to go situation the line to gain *is* the goal line, which is
@@ -516,6 +544,16 @@ function drawField() {
     geo.flight.forEach(function (t) {
       t.pts.forEach(function (q) { xs.push(q.x); ys.push(q.y); });
     });
+    /* Half the coverage runs outside that box on a typical play, which is
+       the cost of framing the action rather than the field. The toggle buys
+       the rest of it back at about twice the width - the whole defence, at
+       half the zoom - and it is off by default because most plays are worth
+       more as the close view. */
+    if ($("fitAll").checked) {
+      geo.pre.forEach(function (q) {
+        q.path.forEach(function (a) { xs.push(a.x); ys.push(a.y); });
+      });
+    }
   }
   /* Fit the action to the canvas. The window has to be widened to the
      canvas's own aspect ratio, or a short throw - where everything happens
@@ -662,20 +700,44 @@ function drawField() {
     g.stroke();
   }
 
-  /* Everyone on the field. Before the throw they move; after it, the players
-     the tracking follows into the air move and the rest hold where the
-     release left them, because that is the last thing recorded about them. */
-  geo.pre.forEach(function (q) {
+  /* Everyone the tracking carries, moving from the snap: every defender in
+     coverage purple rather than as one anonymous grey dot, so the whole
+     coverage is watchable and not just the man on the target.
+
+     After the throw the ones the tracking follows into the air are drawn by
+     their flight paths below and skipped here. The rest have no recorded
+     position past the release - the competition's output file follows only a
+     few players into the air - so they are drawn hollow at the spot the
+     release left them, which says "last seen here" rather than pretending to
+     a measurement nobody took. */
+  geo.preDrawOrder.forEach(function (q) {
     var at = preAt(q.path, preTick);
     if (at.x < x0 || at.x > x1 || at.y < y0 || at.y > y1) return;
-    /* The two the page is about keep their own colours the whole way
-       through; everyone else is background at any point in the play. */
-    var lead = q.kind === 0 || q.kind === 1;
-    if (lead && !inRunUp) return;         /* their flight path draws them */
-    g.fillStyle = lead
-      ? (q.kind === 0 ? cssVar("--recv") : cssVar("--cov"))
-      : "rgba(236,239,230,.30)";
-    g.beginPath(); g.arc(px(at.x), py(at.y), lead ? 6.5 : 4, 0, 6.284); g.fill();
+    if (!inRunUp && q.inAir) return;      /* his flight path draws him */
+    var lead = isLead(q.kind);
+    var r = lead ? 6.5 : q.kind === KIND_DEFENCE ? 5 : 4;
+    var X = px(at.x), Y = py(at.y);
+    if (!inRunUp) {
+      /* Stopped: an open ring, in his own colour so he is still identifiable
+         as the defender he was, at the width the live dots are drawn. */
+      g.strokeStyle = kindColor(q.kind);
+      g.lineWidth = 1.6;
+      g.globalAlpha = q.kind === KIND_OFFENCE ? 0.45 : 0.75;
+      g.beginPath(); g.arc(X, Y, r, 0, 6.284); g.stroke();
+      g.globalAlpha = 1;
+      return;
+    }
+    g.fillStyle = kindColor(q.kind);
+    g.globalAlpha = q.kind === KIND_OFFENCE ? 0.55 : 1;
+    g.beginPath(); g.arc(X, Y, r, 0, 6.284); g.fill();
+    g.globalAlpha = 1;
+    /* The two the page is about carry a light rim, which is what keeps them
+       the subject now that everybody else is in colour too. */
+    if (lead) {
+      g.strokeStyle = "rgba(236,239,230,.85)";
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(X, Y, r, 0, 6.284); g.stroke();
+    }
   });
 
   /* Ball landing spot. */
@@ -693,12 +755,13 @@ function drawField() {
      as a second dot on his own release spot while he is still running the
      route. */
   if (!inRunUp) geo.flight.forEach(function (t) {
-    var color = t.kind === 0 ? cssVar("--recv")
-              : t.kind === 1 ? cssVar("--cov") : cssVar("--other");
+    var color = kindColor(t.kind);
+    var lead = isLead(t.kind);
+    var r = lead ? 6.5 : t.kind === KIND_DEFENCE ? 5 : 4;
     var upto = Math.max(0, Math.min(frame - geo.preTicks, t.pts.length - 1));
     g.strokeStyle = color;
-    g.lineWidth = t.kind === 2 ? 1.5 : 2.5;
-    g.globalAlpha = t.kind === 2 ? 0.55 : 1;
+    g.lineWidth = lead ? 2.5 : t.kind === KIND_DEFENCE ? 2 : 1.5;
+    g.globalAlpha = t.kind === KIND_OFFENCE ? 0.55 : lead ? 1 : 0.8;
     g.beginPath();
     for (var k = 0; k <= upto; k++) {
       var q = t.pts[k];
@@ -707,8 +770,13 @@ function drawField() {
     g.stroke();
     var head = t.pts[upto];
     g.fillStyle = color;
-    g.beginPath(); g.arc(px(head.x), py(head.y), t.kind === 2 ? 4 : 6.5, 0, 6.284); g.fill();
+    g.beginPath(); g.arc(px(head.x), py(head.y), r, 0, 6.284); g.fill();
     g.globalAlpha = 1;
+    if (lead) {
+      g.strokeStyle = "rgba(236,239,230,.85)";
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(px(head.x), py(head.y), r, 0, 6.284); g.stroke();
+    }
   });
 
   /* One clock, zeroed at the throw: negative through the run-up, positive
@@ -743,6 +811,9 @@ $("scrub").addEventListener("input", function () {
   frame = parseInt($("scrub").value, 10);
   drawField();
 });
+
+/* The zoom, not the clock: redraw the frame the play is already on. */
+$("fitAll").addEventListener("change", drawField);
 
 ["q", "fWeek", "fRoute", "fMan", "fResult", "fSort"].forEach(function (id) {
   $(id).addEventListener("input", applyFilters);
