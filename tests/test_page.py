@@ -8,10 +8,11 @@ error anybody sees.
 """
 
 import json
+import re
 
 import pytest
 
-from nfl_scouting import page
+from nfl_scouting import export, page
 from nfl_scouting.config import END_ZONE_DEPTH, FIELD_LENGTH, FIELD_WIDTH
 
 
@@ -190,3 +191,22 @@ class TestShippedFrontEnd:
         source = page.SCRIPT.read_text()
         assert "field-geometry" in source
         assert "var FIELD_LENGTH = 120" not in source
+
+    def test_the_script_speaks_the_kinds_the_exporter_packs(self):
+        """The blob carries a kind per player and nothing that says what one
+        means, so the drawing's idea of the numbering has to be checked
+        against the packing's rather than assumed to have kept up with it."""
+        source = page.SCRIPT.read_text()
+        for name, value in (("KIND_TARGET", export.KIND_TARGET),
+                            ("KIND_COVERAGE", export.KIND_PRIMARY_COVERAGE),
+                            ("KIND_OFFENCE", export.KIND_OTHER_OFFENCE),
+                            ("KIND_DEFENCE", export.KIND_OTHER_DEFENCE)):
+            assert f"{name} = {value}" in source, f"{name} is not {value} in app.js"
+
+    def test_every_colour_the_script_asks_for_is_defined(self):
+        """A custom property the template never sets resolves to the empty
+        string, and a dot drawn in it is drawn in black on green grass."""
+        markup = page.TEMPLATE.read_text()
+        defined = set(re.findall(r"(--[a-z-]+)\s*:", markup))
+        used = set(re.findall(r'"(--[a-z-]+)"', page.SCRIPT.read_text()))
+        assert used <= defined, f"undefined in the template: {sorted(used - defined)}"

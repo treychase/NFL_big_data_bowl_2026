@@ -51,6 +51,14 @@ ROLE_COVERAGE = "Defensive Coverage"
 ROLE_PASSER = "Passer"
 ROLE_OTHER_ROUTE = "Other Route Runner"
 
+# The side of the ball, as the tracking file spells it. The role above says
+# what a player was doing and the side says who he was doing it for; the two
+# are not interchangeable, because every defender in the file carries the
+# same "Defensive Coverage" role whether he was the one on the target or a
+# safety fifteen yards off it.
+SIDE_DEFENCE = "Defense"
+SIDE_OFFENCE = "Offense"
+
 # --- analysis thresholds -----------------------------------------------
 
 # Next Gen Stats calls a receiver "open" at three yards of separation from

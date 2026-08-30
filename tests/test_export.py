@@ -29,11 +29,11 @@ def unpack_block(geometry, index):
 
     pre = []
     for _ in range(n_pre):
-        role = int(blob[p]); p += 1
+        role, in_air = int(blob[p]), int(blob[p + 1]); p += 2
         xs = blob[p:p + 2 * n_pre_frames:2] / scale
         ys = blob[p + 1:p + 2 * n_pre_frames:2] / scale
         p += 2 * n_pre_frames
-        pre.append({"role": role, "x": xs, "y": ys})
+        pre.append({"role": role, "inAir": bool(in_air), "x": xs, "y": ys})
 
     flight = []
     for _ in range(n_flight):
@@ -119,15 +119,43 @@ class TestPackedBlock:
 
     def test_the_run_up_is_kinded_the_same_way_as_the_flight(self, geometry):
         """A dot has to keep its colour across the release, so both sections
-        must speak the same three kinds - and exactly one player in the run-up
+        must speak the same four kinds - and exactly one player in the run-up
         may be the targeted receiver, and one the defender covering him."""
         packed, _frames = geometry
         block = unpack_block(packed, 0)
         kinds = [p["role"] for p in block["pre"]]
         assert set(kinds) <= {export.KIND_TARGET, export.KIND_PRIMARY_COVERAGE,
-                              export.KIND_OTHER_COVERAGE}
+                              export.KIND_OTHER_OFFENCE, export.KIND_OTHER_DEFENCE}
         assert kinds.count(export.KIND_TARGET) == 1
         assert kinds.count(export.KIND_PRIMARY_COVERAGE) <= 1
+
+    def test_every_defender_is_kinded_as_one(self, geometry):
+        """The page draws the coverage by side, so a defender who is not the
+        one charged with the target still has to arrive as a defender rather
+        than fall into the same bucket as the quarterback."""
+        packed, frames = geometry
+        key = _first_key(frames)
+        tracking = frames.tracking
+        play = tracking[(tracking["game_id"] == key[0]) & (tracking["play_id"] == key[1])]
+        sides = play.drop_duplicates("nfl_id").set_index("nfl_id")["player_side"]
+
+        block = unpack_block(packed, 0)
+        kinds = [p["role"] for p in block["pre"]]
+        defence = {export.KIND_PRIMARY_COVERAGE, export.KIND_OTHER_DEFENCE}
+        assert sum(k in defence for k in kinds) == int((sides == "Defense").sum())
+        # The synthetic play carries a safety and a quarterback, so both of
+        # the "everyone else" kinds are exercised rather than assumed.
+        assert export.KIND_OTHER_DEFENCE in kinds
+        assert export.KIND_OTHER_OFFENCE in kinds
+
+    def test_the_run_up_says_who_the_tracking_follows_into_the_air(self, geometry):
+        """The page stops animating a player it has no flight block for, so
+        the flag and the flight section have to agree about who that is."""
+        packed, _frames = geometry
+        block = unpack_block(packed, 0)
+        assert sum(p["inAir"] for p in block["pre"]) == len(block["flight"])
+        # And the safety, whom the output file never follows, is not one.
+        assert any(not p["inAir"] for p in block["pre"])
 
     def test_the_flight_carries_the_target_and_the_coverage(self, geometry):
         packed, _frames = geometry

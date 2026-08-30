@@ -24,6 +24,12 @@
      the two it belonged to. */
   --cold:#2166AC;--hot:#B2182B;--mid:#F3F1EC;
   --recv:#DFA22C;--cov:#542788;--other:#7A8B81;--ball:#C1442A;
+  /* The rest of the defence, in the covering defender's own hue lifted clear
+     of the field green so a whole coverage is legible at once. Lighter
+     rather than a second hue: they are the same thing as the purple dot, not
+     a third category, and the one the play is about is held apart by size
+     and a light rim instead of by colour. */
+  --cov-soft:#9B87C9;
   /* The two lines every broadcast draws, in the colours every broadcast
      draws them: blue for where the play started, yellow for the line to
      gain. Both are lifted well clear of the field green so they read as
@@ -171,8 +177,15 @@ tbody tr.sel{background:var(--panel);box-shadow:inset 3px 0 0 var(--field)}
         letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:10px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;
           vertical-align:baseline}
+/* The open ring the field draws for a player the tracking stops following at
+   the throw, at the same weight the canvas strokes it. */
+.legend i.ring{background:transparent;border:1.5px solid var(--cov-soft)}
 .transport{display:flex;gap:8px;align-items:center;margin-top:10px}
 input[type=range]{flex:1;accent-color:var(--field)}
+/* The view toggle sits with the transport rather than with the filters: it
+   changes what this one picture shows, not which plays are in the table. */
+.transport .fit{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}
+.transport .fit input{accent-color:var(--field);margin:0}
 
 /* ---- heat matrix ----------------------------------------------------- */
 .matrix{border-collapse:separate;border-spacing:2px;width:auto}
@@ -245,11 +258,16 @@ input[type=range]{flex:1;accent-color:var(--field)}
             <button class="pill primary" id="playBtn">Play</button>
             <input type="range" id="scrub" min="0" max="1" value="0" step="1">
             <span class="count" id="clock"></span>
+            <label class="count fit"
+                   title="Zoom out far enough to hold every tracked player, instead of framing the ball and the route">
+              <input type="checkbox" id="fitAll">Whole coverage</label>
           </div>
           <div class="legend">
             <span><i style="background:var(--recv)"></i>Targeted receiver</span>
             <span><i style="background:var(--cov)"></i>Nearest defender</span>
-            <span><i style="background:var(--other)"></i>Other tracked</span>
+            <span><i style="background:var(--cov-soft)"></i>Other defenders</span>
+            <span><i style="background:var(--other)"></i>Other offence</span>
+            <span><i class="ring" style="border-color:var(--cov-soft)"></i>Last seen at the throw</span>
             <span><i style="background:var(--ball)"></i>Ball landing spot</span>
             <span><i style="background:var(--los)"></i>Line of scrimmage</span>
             <span><i style="background:var(--first)"></i>Line to gain</span>
@@ -259,12 +277,22 @@ input[type=range]{flex:1;accent-color:var(--field)}
                three columns of one. -->
           <div id="playStats"></div>
           <p class="caption" id="animCaption">
-            The play runs from the snap. Everybody on the field is tracked up to
-            the throw and their positions are recorded every three tenths of a
-            second, so the run&#8209;up is drawn between samples; the ball in the
-            air is every tenth of a second, for the players the tracking follows
-            there. The clock is zero at the release &mdash; it counts down
-            through the route and up through the flight.
+            The play runs from the snap, with every defender the tracking
+            carries drawn in coverage purple and the man charged with the
+            target in the darker shade.
+            Everybody on the field is tracked up to the throw and their
+            positions are recorded every three tenths of a second, so the
+            run&#8209;up is drawn between samples; the ball in the air is every
+            tenth of a second, and only for the players the tracking follows
+            there &mdash; typically the target and two defenders. The rest have
+            no recorded position after the release, so they stop at the throw
+            and are left as open rings on the spot they were last measured
+            rather than slid along a path nobody recorded. The clock is zero at
+            the release &mdash; it counts down through the route and up through
+            the flight. The view is framed on the ball and the route, which
+            leaves about half the coverage outside it on a typical play;
+            <em>whole coverage</em> pulls back far enough to hold everybody, at
+            roughly half the zoom.
           </p>
           <p class="caption" id="statsCaption">
             Each number carries its percentile among every target of the season
